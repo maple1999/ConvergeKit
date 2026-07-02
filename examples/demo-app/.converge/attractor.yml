@@ -1,0 +1,78 @@
+version: 0.1
+mode: product # v0.1 supports product only; research | venture planned for v0.3+
+
+project:
+  name: demo-app
+  mission: "Prevent AI coding agents from drifting project architecture."
+
+authority:
+  architecture:
+    - docs/architecture/README.md
+  decisions:
+    - docs/decisions/
+  plans:
+    - docs/plans/
+  audits:
+    - docs/audits/
+
+attractor:
+  invariants:
+    - id: no-test-weakening
+      rule: "Tests must not be weakened to match implementation."
+      severity: error
+      check: test-revert-rerun
+
+  dependency_direction:
+    - id: service-cannot-import-ui
+      from: "src/service/**"
+      cannot_import: "src/ui/**"
+      severity: error
+    - id: ui-cannot-import-db
+      from: "src/ui/**"
+      cannot_import: "src/db/**"
+      severity: error
+
+  forbidden_paths:
+    - path: ".env"
+      severity: error
+    - path: "secrets/**"
+      severity: error
+
+  anti_patterns:
+    - id: broad-refactor-during-bugfix
+      description: "Broad refactor during bugfix task."
+      severity: warning
+
+# Verification commands are EXECUTED BY CONVERGE ITSELF.
+# Exit code, output hash and timestamps are recorded as the only
+# authoritative validation evidence. Pre-existing logs are advisory only.
+verification:
+  executed_by: converge
+  evidence_dir: ".converge/reports/${plan}/evidence/"
+  record: [command, exit_code, output_hash, timestamp]
+  before_close:
+    - id: test
+      command: "npm test"
+      required: true
+
+closure:
+  require_fresh_audit: true
+  require_plan_exit_criteria: true
+  require_validation_logs: true
+  allow_human_override: true
+
+agent_policy:
+  default:
+    require_plan_first: false
+    require_read_before_edit: true
+    block_close_without_audit: true
+
+  bugfix:
+    edit_scope: minimal
+    require_focused_test: true
+    max_diff_lines_warning: 300
+    max_diff_lines_blocker: 800
+
+  refactor:
+    require_plan_first: true
+    require_human_approval_if_diff_over: 500

@@ -1,0 +1,17 @@
+{
+  "judgment": "closed",
+  "blockers": [],
+  "warnings": [],
+  "evidence_reviewed": [
+    "git diff",
+    "converge check report",
+    "verification evidence (executed by converge)",
+    "attractor.yml"
+  ],
+  "false_positive_risks": [
+    "no-llm mode: semantic drift (e.g. rationalized wrong structure) is NOT audited; only deterministic checks"
+  ],
+  "next_actions": [
+    "run converge close <PLAN-ID>"
+  ]
+}

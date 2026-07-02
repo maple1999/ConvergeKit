@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.vitest/
+examples/demo-app/.converge/reports/adhoc/
+examples/demo-app/docs/audits/adhoc-fresh-audit.md

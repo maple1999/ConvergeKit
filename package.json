@@ -1,0 +1,48 @@
+{
+  "name": "convergekit",
+  "version": "0.1.0",
+  "description": "Repo-native Attractor-first Harness for AI coding agents. AI agents can pass tests while drifting your architecture. ConvergeKit catches that.",
+  "type": "module",
+  "bin": {
+    "converge": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "architecture",
+    "drift-detection",
+    "closure",
+    "harness"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dependency-cruiser": "^18.0.0",
+    "picomatch": "^4.0.2",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/picomatch": "^3.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

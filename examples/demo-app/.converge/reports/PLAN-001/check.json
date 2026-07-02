@@ -1,0 +1,100 @@
+{
+  "plan": "PLAN-001",
+  "mode": "product",
+  "generatedAt": "2026-07-02T03:29:04.411Z",
+  "commit": "73c65fdd83791cb896feaccb62cfe148cfeb9d0a",
+  "diff": {
+    "base": "HEAD",
+    "changedFiles": 3,
+    "addedLines": 9,
+    "deletedLines": 7,
+    "files": [
+      {
+        "path": "docs/plans/PLAN-001-fix-login-for-uppercase-emails.md",
+        "status": "M",
+        "added": 4,
+        "deleted": 5
+      },
+      {
+        "path": "src/service/auth.js",
+        "status": "M",
+        "added": 1,
+        "deleted": 2
+      },
+      {
+        "path": "tests/auth.test.js",
+        "status": "M",
+        "added": 4,
+        "deleted": 0
+      }
+    ]
+  },
+  "behaviorEvidence": [
+    {
+      "id": "test",
+      "command": "npm test",
+      "required": true,
+      "executed": true,
+      "exitCode": 0,
+      "outputHash": "0db1b670c53c652ff36621ee592f3fd54a99f04987a54df7ea19478e41cdedd0",
+      "startedAt": "2026-07-02T03:29:02.689Z",
+      "durationMs": 540
+    }
+  ],
+  "checks": [
+    {
+      "id": "forbidden-path:.env",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "no forbidden paths touched"
+    },
+    {
+      "id": "forbidden-path:secrets/**",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "no forbidden paths touched"
+    },
+    {
+      "id": "service-cannot-import-ui",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "no boundary violations in changed files"
+    },
+    {
+      "id": "ui-cannot-import-db",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "no boundary violations in changed files"
+    },
+    {
+      "id": "diff-scope",
+      "severity": "warning",
+      "result": "passed",
+      "evidence": "diff is 16 lines across 3 files"
+    },
+    {
+      "id": "plan-non-goals",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "no non-goal areas touched"
+    },
+    {
+      "id": "test-revert-rerun",
+      "severity": "error",
+      "result": "passed",
+      "evidence": "tests pass with both modified and baseline test files (1 test file(s) checked)"
+    },
+    {
+      "id": "test-heuristics",
+      "severity": "advisory",
+      "result": "passed",
+      "evidence": "test files modified: tests/auth.test.js"
+    }
+  ],
+  "status": "passed",
+  "closure": {
+    "allowed": true,
+    "blockers": [],
+    "warnings": []
+  }
+}

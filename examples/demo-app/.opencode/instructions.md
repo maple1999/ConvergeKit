@@ -1,0 +1,37 @@
+<!-- convergekit:generated:start -->
+# ConvergeKit Rules (OpenCode)
+
+Generated from .converge/attractor.yml — edit that file, not this one.
+
+## Project Mission
+
+Prevent AI coding agents from drifting project architecture.
+
+## Attractor Invariants
+
+- **no-test-weakening** (error): Tests must not be weakened to match implementation.
+- **service-cannot-import-ui** (error): `src/service/**` must NOT import `src/ui/**`
+- **ui-cannot-import-db** (error): `src/ui/**` must NOT import `src/db/**`
+- **forbidden path** (error): do not modify `.env`
+- **forbidden path** (error): do not modify `secrets/**`
+
+## Anti-patterns
+
+- Broad refactor during bugfix task.
+
+## Plan / Closure Protocol
+
+1. Before non-trivial work, ensure an active plan exists: `converge plan "<title>"`.
+2. Implement within plan scope. Do not touch non-goal areas.
+3. NEVER weaken tests to make them pass. Test changes are audited by test-revert-rerun.
+4. Before claiming completion, run:
+   - `converge check`
+   - `converge audit --fresh`
+   - `converge close <PLAN_ID>`
+5. Your own completion summary is advisory evidence only. Closure decisions
+   rely on verification commands executed by converge itself.
+
+## Required Commands
+
+- `npm test` (required)
+<!-- convergekit:generated:end -->
