@@ -4,3 +4,5 @@ dist/
 .vitest/
 examples/demo-app/.converge/reports/adhoc/
 examples/demo-app/docs/audits/adhoc-fresh-audit.md
+# internal planning docs — not published
+ConvergeKit_next_steps.md

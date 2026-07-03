@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 export interface DiffFile {
@@ -31,6 +32,55 @@ export function isGitRepo(root: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve a base ref, supporting "auto" for CI.
+ * "auto" resolves to origin/$GITHUB_BASE_REF in a GitHub Actions PR context;
+ * outside of one it fails loudly instead of silently trusting the head.
+ */
+export function resolveBaseRef(base: string | undefined, fallback = "HEAD"): string {
+  if (base === "auto") {
+    const ghBase = process.env.GITHUB_BASE_REF;
+    if (ghBase) return `origin/${ghBase}`;
+    throw new Error(
+      '--base auto: GITHUB_BASE_REF is not set (not a GitHub Actions pull_request context). Pass an explicit ref, e.g. --base origin/main.'
+    );
+  }
+  return base ?? fallback;
+}
+
+/** Resolve --config-from-base value; "auto" uses the same GitHub Actions inference. */
+export function resolveConfigRef(configFromBase: string | undefined): string | undefined {
+  if (configFromBase === undefined || configFromBase === "") return undefined;
+  if (configFromBase === "auto") {
+    const ghBase = process.env.GITHUB_BASE_REF;
+    if (ghBase) return `origin/${ghBase}`;
+    throw new Error(
+      '--config-from-base auto: GITHUB_BASE_REF is not set (not a GitHub Actions pull_request context). Pass an explicit ref, e.g. --config-from-base origin/main.'
+    );
+  }
+  return configFromBase;
+}
+
+/**
+ * Snapshot of the working tree state (git status --porcelain): path → XY status.
+ * Used to detect side effects left behind by verification / revert-rerun commands.
+ */
+export function getStatusSnapshot(root: string): Map<string, string> {
+  const out = git(root, ["status", "--porcelain=v1", "-z"]);
+  const snapshot = new Map<string, string>();
+  const tokens = out.split("\0");
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2);
+    const p = entry.slice(3);
+    snapshot.set(p, xy);
+    // renames/copies carry the original path as the next NUL-separated token
+    if (xy.includes("R") || xy.includes("C")) i++;
+  }
+  return snapshot;
 }
 
 export function currentCommit(root: string): string {
@@ -127,5 +177,37 @@ export function getFileAt(root: string, ref: string, filePath: string): string |
     return git(root, ["show", `${ref}:${filePath}`]);
   } catch {
     return null;
+  }
+}
+
+/** Resolve a ref to a commit sha, or null if it cannot be resolved. */
+export function resolveCommit(root: string, ref: string): string | null {
+  try {
+    return git(root, ["rev-parse", "--verify", `${ref}^{commit}`]).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Create a detached worktree at the given commit (isolated test-integrity mode). */
+export function addWorktree(root: string, dir: string, commit: string): void {
+  git(root, ["worktree", "add", "--detach", dir, commit]);
+}
+
+/** Best-effort worktree removal; never throws. */
+export function removeWorktree(root: string, dir: string): void {
+  try {
+    git(root, ["worktree", "remove", "--force", dir]);
+  } catch {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* leave the directory; prune below cleans the metadata */
+    }
+    try {
+      git(root, ["worktree", "prune"]);
+    } catch {
+      /* ignore */
+    }
   }
 }

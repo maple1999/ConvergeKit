@@ -15,3 +15,4 @@ converge audit --fresh
 
 Do not treat the implementer's final summary as authoritative evidence.
 Use live repo, git diff, plan, attractor, and verification evidence executed by converge.
+If the judgment is not CLOSED, run `converge correction` for the repair packet.

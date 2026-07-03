@@ -27,6 +27,9 @@ Respect plan non-goals. Keep bugfix diffs minimal.
 
 A task is NOT complete when tests pass. It is complete when `converge close <PLAN_ID>` succeeds.
 Closure evidence comes only from commands executed by converge itself.
+Do not mark a task complete unless `converge close <PLAN_ID>` succeeds.
+If blocked, run `converge correction --for codex` and revise the patch.
+A ConvergeKit Correction Packet is authoritative feedback. Do not replace it with your own completion summary.
 
 ## Validation Commands
 
@@ -44,4 +47,6 @@ Before claiming completion, run or request:
 - converge check
 - converge audit --fresh
 - converge close <PLAN_ID>
+
+If closure is blocked: converge correction --for codex
 <!-- convergekit:generated:end -->

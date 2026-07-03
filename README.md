@@ -37,6 +37,8 @@ Blockers:
 
 Run it yourself: `bash scripts/demo.sh` (uses [examples/demo-app](examples/demo-app)). The script also reproduces the second scenario — an agent that "fixes" a task by adapting the tests to its implementation, caught by **test-revert-rerun**: converge reverts the test-file changes to the diff base, re-runs the tests, and blocks closure if the implementation only passes with the modified tests.
 
+When closure is blocked, `converge correction` turns the reports into a **Correction Packet** — structured repair instructions (violated rule, evidence, allowed repair direction, required verification) you can feed straight back to Claude/Codex for the next round.
+
 ## Quickstart
 
 ```bash
@@ -51,6 +53,7 @@ converge plan "fix auth bug" --type bugfix
 
 converge check               # diff vs attractor + verification commands
 converge audit --fresh       # independent audit from live repo evidence
+converge correction          # blocked? generate a repair packet for the agent
 converge close PLAN-001      # blocked unless check + audit + exit criteria pass
 converge handoff             # summary for the next AI session
 ```
@@ -100,6 +103,8 @@ One line: **spec tools govern what to do, review tools govern code quality, Conv
 
 ## CI
 
+The quickest way is the bundled GitHub Action (composite, installs from this repo):
+
 ```yaml
 name: ConvergeKit Check
 on: [pull_request]
@@ -110,12 +115,56 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-      - run: npm install -g convergekit
-      - run: converge check --strict --base origin/${{ github.base_ref }}
-      - run: converge audit --fresh --no-llm --base origin/${{ github.base_ref }}
+      - uses: maple1999/ConvergeKit@master   # or a pinned tag
+        with:
+          base: auto                # origin/$GITHUB_BASE_REF
+          config-from-base: auto    # trust boundary: attractor from base branch
+          strict: true
+          audit: no-llm
 ```
 
-`error`-severity blockers fail CI; warnings report without failing; advisory findings are recorded only.
+Or run the CLI directly:
+
+```yaml
+      - run: npm install -g convergekit
+      - run: converge check --strict --base auto --config-from-base auto
+      - run: converge audit --fresh --no-llm --base auto --config-from-base auto
+```
+
+`error`-severity blockers fail CI; warnings report without failing (`--strict` escalates them); advisory findings are recorded only. When the gate fails, the action appends the check report and Correction Packet to the job summary.
+
+## Security model
+
+ConvergeKit is an *external acceptance layer* for untrusted patches — including patches that try to modify ConvergeKit's own rules. The trust boundaries:
+
+- **CI never trusts the PR head's config.** With `--config-from-base <ref>` (or `auto`), `.converge/attractor.yml` — including the verification commands converge executes — is read from the base branch via `git show`, not from the checked-out PR. A PR that deletes a boundary rule or swaps `npm test` for `echo ok` changes nothing about how it is judged.
+- **Attractor changes require a human.** Any diff touching `.converge/attractor.yml` (or `.converge/templates/`, `.converge/profiles/`) raises `attractor-config-modified`. It is neither a pass nor a plain failure: the fresh audit maps it to **Needs Human Decision**, and closure requires `converge close --human-approved --reason "..."` (recorded in `closure-override.json`).
+- **Verification evidence is non-fakeable by construction.** Commands are executed by converge itself; exit code, output hash and timestamps are recorded. Pre-existing logs are advisory only.
+- **test-revert-rerun cleans up after itself.** In-place mode snapshots test files, verifies the restore byte-for-byte, and *fails the check* if restoration failed or the working tree was left dirty (`test-revert-restore`, `working-tree-side-effects`). `--test-integrity-mode isolated` (experimental) runs the whole revert-rerun in a temporary detached git worktree and never touches your working tree; if the isolated environment needs setup, configure `verification.setup_for_isolated` (e.g. `npm ci`).
+- **Side effects are reported, not hidden.** Test commands that generate snapshots/coverage/cache files show up as a warning (a blocker under `--strict`); anything that *reverts your uncommitted changes* is a blocker outright.
+
+Known boundary: side-effect detection uses `git status`, so files matched by `.gitignore` are not tracked. The LLM audit is advisory-merged — deterministic blockers always survive; the LLM never owns final authority.
+
+## The correction loop
+
+Blocking is only half the job; the other half is steering the next attempt:
+
+```text
+agent patch → converge check: BLOCKED
+            → converge correction --for claude
+            → agent applies the packet (fix stays, violation goes)
+            → converge check: PASSED → converge audit --fresh → converge close
+```
+
+The packet (`.converge/reports/<PLAN>/correction.md`) contains the violated rule, the evidence, an **allowed repair direction**, required verification commands, and an explicit *Do Not* list (don't weaken tests, don't edit the attractor, don't refactor beyond scope). `--for claude` / `--for codex` adjust framing only — the facts come from the same `check.json` / `audit.json`.
+
+## What ConvergeKit is not
+
+- Not a coding agent, and not a Claude Code / Codex replacement — it gates their output.
+- Not a PR review bot: it doesn't hunt bugs or style issues; it answers *may this be declared done?*
+- Not a spec/plan generator: plans are scoped closure contracts, not designs.
+- Not a sandbox: verification commands run with your shell's permissions. Point it at repos you trust to build.
+- Skills/`CLAUDE.md` are *entry points* for agents; the CLI and CI runs are the authority.
 
 ## Commands
 
@@ -123,17 +172,27 @@ jobs:
 |---|---|
 | `converge init` | Scaffold `.converge/` + `docs/`, infer boundary-rule drafts from directory layout |
 | `converge plan "<title>" --type bugfix\|feature\|refactor` | Create a numbered plan, set it active |
-| `converge check [--json] [--strict] [--base <ref>] [--no-exec]` | Full deterministic gate; exit 1 when blocked |
-| `converge audit --fresh [--llm claude\|codex] [--no-llm]` | Evidence pack + independent audit |
-| `converge close <PLAN-ID> [--force\|--human-approved --reason <r>]` | Close a plan; refuses while blockers exist |
+| `converge check [--json] [--strict] [--base <ref>\|auto] [--config-from-base <ref>\|auto] [--test-integrity-mode in-place\|isolated] [--no-exec]` | Full deterministic gate; exit 1 when blocked |
+| `converge audit --fresh [--llm claude\|codex] [--no-llm] [--base <ref>\|auto] [--config-from-base <ref>\|auto]` | Evidence pack + independent audit |
+| `converge correction [--plan <id>] [--for claude\|codex] [--json]` | Correction Packet from the latest check/audit reports |
+| `converge close <PLAN-ID> [--force\|--human-approved --reason <r>] [--config-from-base <ref>]` | Close a plan; refuses while blockers exist |
 | `converge closure-status [PLAN-ID]` | Closure state for CI |
 | `converge handoff [--for claude\|codex]` | Cross-session handoff summary |
 | `converge memory add --type <type> --summary <s>` | Record a trajectory lesson |
-| `converge compile --target claude\|codex\|opencode\|cline [--all]` | Generate agent configs from the attractor |
+| `converge compile --target claude\|codex\|opencode\|cline [--all] [--with-hooks]` | Generate agent configs from the attractor |
+
+## Claude Code integration
+
+```bash
+converge compile --target claude               # CLAUDE.md + skills (incl. converge-correction)
+converge compile --target claude --with-hooks  # opt-in: Stop hook that blocks "done" while closure is blocked
+```
+
+The Stop hook (`.claude/hooks/converge-stop-check.sh`) runs a fast `converge check --no-exec` when the session tries to finish; if closure is blocked it feeds "run `converge correction`" back to the agent (once — it never loops). Remove the entry from `.claude/settings.json` to disable. Skills are entry points; the hook, CLI and CI remain the authority.
 
 ## Status & roadmap
 
-v0.1 (this release): product mode, JS/TS boundary checking, the full closure loop, Claude/Codex/OpenCode/Cline compilation. See [ConvergeKit_PRD_v0.1.md](ConvergeKit_PRD_v0.1.md) for the full PRD, including v0.2+ (GitHub Action package, holdout tests, Python via import-linter, MCP server) and v0.3+ (research / venture modes).
+v0.1-beta (this release): product mode, JS/TS boundary checking, the full closure loop, CI trust boundary (`--config-from-base`), safe test-revert-rerun (restore verification + isolated mode), Correction Packets, GitHub Action, Claude/Codex/OpenCode/Cline compilation with opt-in Claude hooks. See [ConvergeKit_PRD_v0.1.md](ConvergeKit_PRD_v0.1.md) for the full PRD, including v0.2+ (holdout tests, Python via import-linter, MCP server) and v0.3+ (research / venture modes).
 
 ## Development
 

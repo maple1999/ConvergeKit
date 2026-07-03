@@ -35,6 +35,7 @@ Prevent AI coding agents from drifting project architecture.
 
 - Create a plan before non-trivial work: `converge plan "<title>"`
 - After implementing: `converge check` → `converge audit --fresh` → `converge close <PLAN_ID>`
+- If converge check/audit blocks closure, run `converge correction` and follow the Correction Packet before continuing.
 - Closure evidence comes ONLY from commands executed by converge; your summary is advisory.
 - Never weaken tests: test file changes trigger test-revert-rerun.
 
@@ -47,5 +48,6 @@ Prevent AI coding agents from drifting project architecture.
 - converge-plan: at the start of any non-trivial task
 - converge-check: after making changes, before declaring done
 - converge-audit: when a task implementation appears complete
+- converge-correction: when check/audit blocks closure — get the repair packet
 - converge-close: to formally close a plan
 <!-- convergekit:generated:end -->

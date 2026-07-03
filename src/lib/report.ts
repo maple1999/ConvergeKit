@@ -25,6 +25,8 @@ export interface CheckReport {
   mode: string;
   generatedAt: string;
   commit: string;
+  /** where attractor.yml was loaded from: "working tree" or "<ref>:.converge/attractor.yml" */
+  configSource: string;
   diff: {
     base: string;
     changedFiles: number;
@@ -70,6 +72,7 @@ export function renderCheckMarkdown(r: CheckReport): string {
   lines.push(`- Plan: ${r.plan ?? "(no active plan)"}`);
   lines.push(`- Mode: ${r.mode}`);
   lines.push(`- Commit: ${r.commit}`);
+  lines.push(`- Config: ${r.configSource}`);
   lines.push(`- Generated: ${r.generatedAt}`);
   lines.push("");
   lines.push(`## Behavior Evidence (executed by converge)`);

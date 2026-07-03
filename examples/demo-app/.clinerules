@@ -28,7 +28,10 @@ Prevent AI coding agents from drifting project architecture.
    - `converge check`
    - `converge audit --fresh`
    - `converge close <PLAN_ID>`
-5. Your own completion summary is advisory evidence only. Closure decisions
+5. If check/audit blocks closure, run `converge correction` and follow the Correction
+   Packet before continuing. The packet is authoritative feedback — do not replace it
+   with your own completion summary.
+6. Your own completion summary is advisory evidence only. Closure decisions
    rely on verification commands executed by converge itself.
 
 ## Required Commands

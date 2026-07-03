@@ -13,4 +13,4 @@ Run:
 converge close <PLAN_ID>
 ```
 
-If closure is blocked, resolve blockers and re-run check + audit. Never use --force without recording a reason.
+If closure is blocked, run `converge correction`, resolve blockers and re-run check + audit. Never use --force without recording a reason.

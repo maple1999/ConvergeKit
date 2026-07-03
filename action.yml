@@ -1,0 +1,86 @@
+name: "ConvergeKit Check"
+description: >-
+  Closure gate for AI-generated PRs: converge check + fresh audit against the
+  base branch. AI agents can pass tests while drifting your architecture —
+  this catches that. Reads .converge/attractor.yml from the base branch so a
+  PR cannot weaken its own gate.
+author: "ConvergeKit"
+branding:
+  icon: "check-circle"
+  color: "purple"
+
+inputs:
+  base:
+    description: >-
+      Diff base ref. "auto" resolves to origin/$GITHUB_BASE_REF in a
+      pull_request context.
+    required: false
+    default: "auto"
+  config-from-base:
+    description: >-
+      Ref to load .converge/attractor.yml and verification commands from
+      (trust boundary for untrusted PRs). "auto" resolves like base;
+      "" disables and trusts the PR head (not recommended).
+    required: false
+    default: "auto"
+  strict:
+    description: "Treat warnings as blockers (converge check --strict)."
+    required: false
+    default: "true"
+  audit:
+    description: 'Fresh audit mode: "no-llm" (deterministic, default) or "none" to skip.'
+    required: false
+    default: "no-llm"
+  test-integrity-mode:
+    description: 'test-revert-rerun mode: "in-place" or "isolated" (experimental).'
+    required: false
+    default: "in-place"
+  working-directory:
+    description: "Directory of the repo under check."
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install ConvergeKit
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        npm ci --no-audit --no-fund
+        npm run build
+        npm link
+
+    - name: converge check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        args=(--base "${{ inputs.base }}" --test-integrity-mode "${{ inputs.test-integrity-mode }}")
+        if [ -n "${{ inputs.config-from-base }}" ]; then
+          args+=(--config-from-base "${{ inputs.config-from-base }}")
+        fi
+        if [ "${{ inputs.strict }}" = "true" ]; then
+          args+=(--strict)
+        fi
+        echo "## ConvergeKit Check" >> "$GITHUB_STEP_SUMMARY"
+        converge check "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: converge audit --fresh
+      if: ${{ inputs.audit != 'none' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        args=(--fresh --no-llm --base "${{ inputs.base }}")
+        if [ -n "${{ inputs.config-from-base }}" ]; then
+          args+=(--config-from-base "${{ inputs.config-from-base }}")
+        fi
+        echo "## ConvergeKit Fresh Audit" >> "$GITHUB_STEP_SUMMARY"
+        converge audit "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: correction packet on failure
+      if: ${{ failure() }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "## ConvergeKit Correction Packet" >> "$GITHUB_STEP_SUMMARY"
+        converge correction 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || true

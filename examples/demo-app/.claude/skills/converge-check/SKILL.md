@@ -13,4 +13,4 @@ Run:
 converge check
 ```
 
-Fix every blocker before proceeding. Warnings should be addressed or explicitly justified in the plan.
+Fix every blocker before proceeding. If closure is blocked, run `converge correction` and follow the Correction Packet. Warnings should be addressed or explicitly justified in the plan.

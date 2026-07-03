@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadAttractor } from "../lib/config.js";
 import { findRepoRoot, readFileIfExists, toRepoRel, writeFileSafe } from "../lib/paths.js";
+import { resolveConfigRef } from "../lib/git.js";
 import { parsePlan, setActivePlan, updatePlanStatus } from "../lib/plans.js";
 import type { AuditJudgment } from "./audit.js";
 import type { CheckReport } from "../lib/report.js";
@@ -11,6 +12,8 @@ export interface CloseOptions {
   force?: boolean;
   humanApproved?: boolean;
   reason?: string;
+  /** trust boundary: load closure policy from this ref instead of the working tree ("auto" supported) */
+  configFromBase?: string;
 }
 
 /**
@@ -26,7 +29,7 @@ export interface CloseOptions {
  */
 export async function closeCommand(planId: string, opts: CloseOptions): Promise<void> {
   const root = findRepoRoot();
-  const cfg = loadAttractor(root);
+  const cfg = loadAttractor(root, { configFromBase: resolveConfigRef(opts.configFromBase) });
   const plan = parsePlan(root, planId);
   if (!plan) {
     console.error(`Plan ${planId} not found in docs/plans/.`);

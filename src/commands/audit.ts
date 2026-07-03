@@ -3,10 +3,17 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadAttractor } from "../lib/config.js";
 import { findRepoRoot, readFileIfExists, writeFileSafe, toRepoRel } from "../lib/paths.js";
-import { currentBranch, currentCommit, getDiffText, getDiffSummary } from "../lib/git.js";
+import {
+  currentBranch,
+  getDiffText,
+  getFileAt,
+  resolveBaseRef,
+  resolveConfigRef,
+} from "../lib/git.js";
 import { getActivePlanId, parsePlan, updatePlanStatus } from "../lib/plans.js";
 import { runCheck } from "./check.js";
 import { runCommand, truncate } from "../lib/exec.js";
+import { ATTRACTOR_MODIFIED_ID } from "../checks/configIntegrity.js";
 import type { CheckReport } from "../lib/report.js";
 
 export interface AuditOptions {
@@ -14,6 +21,8 @@ export interface AuditOptions {
   llm?: string; // claude | codex | none
   noLlm?: boolean;
   base?: string;
+  /** trust boundary: load attractor.yml from this ref instead of the working tree ("auto" supported) */
+  configFromBase?: string;
 }
 
 export interface AuditJudgment {
@@ -59,18 +68,24 @@ Respond with STRICT JSON only, matching:
 
 export async function auditCommand(opts: AuditOptions): Promise<AuditJudgment> {
   const root = findRepoRoot();
-  const cfg = loadAttractor(root);
+  const base = resolveBaseRef(opts.base);
+  const configFromBase = resolveConfigRef(opts.configFromBase);
+  const cfg = loadAttractor(root, { configFromBase });
   const planId = opts.plan ?? getActivePlanId(root);
   const plan = planId ? parsePlan(root, planId) : null;
   const reportDir = path.join(root, ".converge", "reports", planId ?? "adhoc");
 
   // 1. deterministic checks first — fresh audit builds on the check report
   console.log("Running converge check (deterministic pass)...");
-  const check = await runCheck({ plan: planId ?? undefined, base: opts.base });
+  const check = await runCheck({
+    plan: planId ?? undefined,
+    base,
+    configFromBase,
+  });
 
   // 2. build evidence pack
-  const diffText = getDiffText(root, opts.base ?? "HEAD");
-  const evidencePack = buildEvidencePack(root, cfg, planId, plan?.file ?? null, check, diffText);
+  const diffText = getDiffText(root, base);
+  const evidencePack = buildEvidencePack(root, cfg, planId, plan?.file ?? null, check, diffText, configFromBase);
   writeFileSafe(path.join(reportDir, "evidence-pack.md"), evidencePack.md);
   writeFileSafe(path.join(reportDir, "evidence-pack.json"), JSON.stringify(evidencePack.json, null, 2));
   console.log(`Evidence pack written: ${toRepoRel(root, path.join(reportDir, "evidence-pack.md"))}`);
@@ -98,16 +113,22 @@ export async function auditCommand(opts: AuditOptions): Promise<AuditJudgment> {
   writeFileSafe(auditFile, reportMd);
   writeFileSafe(path.join(reportDir, "audit.json"), JSON.stringify(judgment, null, 2));
   console.log(`Fresh audit report written: ${toRepoRel(root, auditFile)}`);
-  console.log(`\nFinal judgment: ${judgment.judgment.replace("_", " ").toUpperCase()}`);
+  console.log(`\nFinal judgment: ${judgment.judgment.replace(/_/g, " ").toUpperCase()}`);
   if (judgment.blockers.length) {
     console.log("Blockers:");
     judgment.blockers.forEach((b, i) => console.log(`  ${i + 1}. ${b}`));
+  }
+  if (judgment.judgment === "needs_human_decision") {
+    console.log(
+      "\nA human must review this change (e.g. the attractor config was modified). Approve with: converge close <PLAN-ID> --human-approved --reason \"...\""
+    );
   }
 
   if (planId && judgment.judgment === "closed") {
     updatePlanStatus(root, planId, "Audited");
   }
-  if (judgment.judgment === "not_closed") process.exitCode = 1;
+  // the gate must stay red in CI until a human decides
+  if (judgment.judgment !== "closed") process.exitCode = 1;
   return judgment;
 }
 
@@ -117,10 +138,13 @@ function buildEvidencePack(
   planId: string | null,
   planFile: string | null,
   check: CheckReport,
-  diffText: string
+  diffText: string,
+  configFromBase?: string
 ): { md: string; json: Record<string, unknown> } {
   const planContent = planFile ? readFileIfExists(planFile) : null;
-  const attractorRaw = readFileIfExists(path.join(root, ".converge", "attractor.yml"));
+  const attractorRaw = configFromBase
+    ? getFileAt(root, configFromBase, ".converge/attractor.yml")
+    : readFileIfExists(path.join(root, ".converge", "attractor.yml"));
   const memory = collectMemory(root);
   const archDocs = (cfg.authority?.architecture ?? [])
     .map((p) => ({ path: p, content: readFileIfExists(path.join(root, p)) }))
@@ -153,6 +177,8 @@ function buildEvidencePack(
 ${planContent ? "```markdown\n" + truncate(planContent, 8000) + "\n```" : "(no active plan)"}
 
 ## Attractor Spec
+
+(source: ${check.configSource})
 
 \`\`\`yaml
 ${truncate(attractorRaw ?? "(missing)", 6000)}
@@ -255,31 +281,65 @@ function toStrArr(v: unknown): string[] {
   return Array.isArray(v) ? v.map(String) : [];
 }
 
+/**
+ * Deterministic closure verdict from the check report. An attractor-config
+ * change is neither pass nor plain fail: when it is the ONLY blocker, the
+ * verdict is needs_human_decision (a human reviews the gate change itself).
+ */
+function deterministicClosureJudgment(check: CheckReport): AuditJudgment["judgment"] {
+  if (check.closure.allowed) return "closed";
+  const errorFindings = check.checks.filter(
+    (c) => c.result === "failed" && c.severity === "error"
+  );
+  const verificationFailed = check.behaviorEvidence.some(
+    (e) => e.required && (!e.executed || e.exitCode !== 0)
+  );
+  const onlyConfigModified =
+    !verificationFailed &&
+    errorFindings.length > 0 &&
+    errorFindings.every((c) => c.id === ATTRACTOR_MODIFIED_ID);
+  return onlyConfigModified ? "needs_human_decision" : "not_closed";
+}
+
 /** LLM audit never owns final authority: deterministic blockers always stay blockers. */
 function mergeWithDeterministic(llm: AuditJudgment, check: CheckReport): AuditJudgment {
   const blockers = [...new Set([...check.closure.blockers, ...llm.blockers])];
+  const deterministic = deterministicClosureJudgment(check);
   let judgment = llm.judgment;
-  if (blockers.length > 0 && judgment === "closed") judgment = "not_closed";
+  if (deterministic === "not_closed") judgment = "not_closed";
+  else if (deterministic === "needs_human_decision" && judgment === "closed")
+    judgment = "needs_human_decision";
+  else if (blockers.length > 0 && judgment === "closed") judgment = "not_closed";
   return { ...llm, judgment, blockers };
 }
 
 function deterministicJudgment(check: CheckReport): AuditJudgment {
+  const judgment = deterministicClosureJudgment(check);
   return {
-    judgment: check.closure.allowed ? "closed" : "not_closed",
+    judgment,
     blockers: check.closure.blockers,
     warnings: check.closure.warnings,
     evidence_reviewed: [
       "git diff",
       "converge check report",
       "verification evidence (executed by converge)",
-      "attractor.yml",
+      `attractor.yml (${check.configSource})`,
     ],
     false_positive_risks: [
       "no-llm mode: semantic drift (e.g. rationalized wrong structure) is NOT audited; only deterministic checks",
     ],
-    next_actions: check.closure.allowed
-      ? ["run converge close <PLAN-ID>"]
-      : ["resolve blockers, then re-run converge check and converge audit --fresh"],
+    next_actions:
+      judgment === "closed"
+        ? ["run converge close <PLAN-ID>"]
+        : judgment === "needs_human_decision"
+          ? [
+              "a human must review the attractor config change",
+              "approve with converge close <PLAN-ID> --human-approved --reason \"...\", or revert the config change",
+            ]
+          : [
+              "run converge correction to generate a repair packet",
+              "resolve blockers, then re-run converge check and converge audit --fresh",
+            ],
   };
 }
 

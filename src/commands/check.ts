@@ -1,7 +1,14 @@
 import path from "node:path";
 import { loadAttractor } from "../lib/config.js";
 import { findRepoRoot, writeFileSafe } from "../lib/paths.js";
-import { currentCommit, getDiffSummary, isGitRepo } from "../lib/git.js";
+import {
+  currentCommit,
+  getDiffSummary,
+  getStatusSnapshot,
+  isGitRepo,
+  resolveBaseRef,
+  resolveConfigRef,
+} from "../lib/git.js";
 import { getActivePlanId, parsePlan, updatePlanStatus } from "../lib/plans.js";
 import {
   CheckReport,
@@ -11,30 +18,50 @@ import {
 import { checkForbiddenPaths } from "../checks/forbiddenPath.js";
 import { checkDependencyDirection } from "../checks/boundary.js";
 import { checkDiffScope } from "../checks/diffScope.js";
-import { checkTestIntegrity } from "../checks/testIntegrity.js";
+import { checkTestIntegrity, type TestIntegrityMode } from "../checks/testIntegrity.js";
 import { checkAntiPatterns } from "../checks/antiPattern.js";
+import { checkConfigIntegrity } from "../checks/configIntegrity.js";
+import { compareWorkingTreeSnapshots } from "../checks/sideEffects.js";
 import { runVerification } from "../checks/verification.js";
 
 export interface CheckOptions {
   plan?: string;
   json?: boolean;
   strict?: boolean;
+  /** diff base ref; "auto" resolves origin/$GITHUB_BASE_REF in GitHub Actions */
   base?: string;
   /** skip executing verification commands & revert-rerun (fast structural check) */
   noExec?: boolean;
+  /** trust boundary: load attractor.yml from this ref instead of the working tree ("auto" supported) */
+  configFromBase?: string;
+  /** test-revert-rerun execution mode */
+  testIntegrityMode?: string;
 }
+
+const TEST_INTEGRITY_MODES: TestIntegrityMode[] = ["in-place", "isolated"];
 
 export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
   const root = findRepoRoot();
   if (!isGitRepo(root)) {
     throw new Error(`Not a git repository: ${root}. converge check needs git diff as input.`);
   }
-  const cfg = loadAttractor(root);
-  const base = opts.base ?? "HEAD";
+  const base = resolveBaseRef(opts.base);
+  const configFromBase = resolveConfigRef(opts.configFromBase);
+  const testIntegrityMode = (opts.testIntegrityMode ?? "in-place") as TestIntegrityMode;
+  if (!TEST_INTEGRITY_MODES.includes(testIntegrityMode)) {
+    throw new Error(
+      `invalid --test-integrity-mode "${opts.testIntegrityMode}". Expected in-place | isolated.`
+    );
+  }
+
+  const cfg = loadAttractor(root, { configFromBase });
   const diff = getDiffSummary(root, base);
 
   const planId = opts.plan ?? getActivePlanId(root);
   const plan = planId ? parsePlan(root, planId) : null;
+
+  // snapshot the working tree before any command execution (side-effect detection)
+  const treeBefore = opts.noExec ? null : getStatusSnapshot(root);
 
   // E. verification commands — executed by converge itself
   const behaviorEvidence = runVerification(root, cfg, planId, {
@@ -50,9 +77,17 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
     ...checkTestIntegrity(root, cfg, diff, {
       testCommand,
       runRevertRerun: !opts.noExec,
+      mode: testIntegrityMode,
+      setupCommands: cfg.verification?.setup_for_isolated ?? [],
     }),
     ...checkAntiPatterns(root, cfg, diff),
+    ...checkConfigIntegrity(diff, { configFromBase }),
   ];
+
+  // working-tree side effects of everything converge executed above
+  if (treeBefore) {
+    checks.push(compareWorkingTreeSnapshots(treeBefore, getStatusSnapshot(root)));
+  }
 
   // strict mode: warnings become blockers
   if (opts.strict) {
@@ -69,6 +104,9 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
     mode: cfg.mode,
     generatedAt: new Date().toISOString(),
     commit: currentCommit(root),
+    configSource: configFromBase
+      ? `${configFromBase}:.converge/attractor.yml`
+      : "working tree",
     diff: {
       base,
       changedFiles: diff.files.length,
@@ -107,5 +145,18 @@ export async function checkCommand(opts: CheckOptions): Promise<void> {
   } else {
     console.log(renderCheckMarkdown(report));
   }
-  if (report.status === "blocked") process.exitCode = 1;
+  if (report.status === "blocked") {
+    const configModified = report.checks.some(
+      (c) => c.id === "attractor-config-modified" && c.result === "failed"
+    );
+    if (configModified) {
+      console.error(
+        "\nNote: this diff modifies the attractor config itself — a human must review and approve (converge close --human-approved)."
+      );
+    }
+    console.error(
+      'Closure blocked. Run "converge correction" to generate a repair packet for the next agent run.'
+    );
+    process.exitCode = 1;
+  }
 }

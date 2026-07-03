@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { convergeDir, readFileIfExists } from "./paths.js";
+import { getFileAt } from "./git.js";
 
 export interface Invariant {
   id: string;
@@ -64,6 +65,8 @@ export interface AttractorConfig {
     evidence_dir?: string;
     record?: string[];
     before_close?: VerificationCommand[];
+    /** commands run inside the isolated worktree before tests (e.g. "npm ci") */
+    setup_for_isolated?: string[];
   };
   closure?: {
     require_fresh_audit?: boolean;
@@ -81,19 +84,42 @@ export function attractorPath(root: string): string {
   return path.join(convergeDir(root), "attractor.yml");
 }
 
-export function loadAttractor(root: string): AttractorConfig {
-  const file = attractorPath(root);
-  const raw = readFileIfExists(file);
-  if (raw === null) {
-    throw new ConfigError(
-      `No .converge/attractor.yml found at ${file}. Run "converge init" first.`
-    );
+export interface LoadAttractorOptions {
+  /**
+   * Trust boundary for CI / untrusted PRs: read .converge/attractor.yml from
+   * this git ref (e.g. origin/main) instead of the working tree, so a PR that
+   * edits the attractor or its verification commands cannot weaken the gate.
+   */
+  configFromBase?: string;
+}
+
+export function loadAttractor(root: string, opts: LoadAttractorOptions = {}): AttractorConfig {
+  let raw: string | null;
+  let source: string;
+  if (opts.configFromBase) {
+    raw = getFileAt(root, opts.configFromBase, ".converge/attractor.yml");
+    source = `${opts.configFromBase}:.converge/attractor.yml`;
+    if (raw === null) {
+      throw new ConfigError(
+        `No .converge/attractor.yml found at ref "${opts.configFromBase}". ` +
+          `The base branch must contain the attractor for --config-from-base to work.`
+      );
+    }
+  } else {
+    const file = attractorPath(root);
+    raw = readFileIfExists(file);
+    source = file;
+    if (raw === null) {
+      throw new ConfigError(
+        `No .converge/attractor.yml found at ${file}. Run "converge init" first.`
+      );
+    }
   }
   let parsed: unknown;
   try {
     parsed = YAML.parse(raw);
   } catch (e) {
-    throw new ConfigError(`Failed to parse attractor.yml: ${(e as Error).message}`);
+    throw new ConfigError(`Failed to parse attractor.yml (${source}): ${(e as Error).message}`);
   }
   return validateAttractor(parsed);
 }

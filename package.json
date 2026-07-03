@@ -1,6 +1,6 @@
 {
   "name": "convergekit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Repo-native Attractor-first Harness for AI coding agents. AI agents can pass tests while drifting your architecture. ConvergeKit catches that.",
   "type": "module",
   "bin": {

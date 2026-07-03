@@ -43,6 +43,9 @@ npm test >/dev/null 2>&1 && echo "npm test: PASS  <-- agent would claim completi
 step "converge check"
 $CONVERGE check || true
 
+step "converge correction — the repair packet for the next agent run"
+$CONVERGE correction --for claude || true
+
 step "scenario 1 verdict: tests passed, closure BLOCKED (ui-cannot-import-db)"
 git checkout -q -- src
 
