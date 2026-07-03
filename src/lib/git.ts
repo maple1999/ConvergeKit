@@ -64,6 +64,17 @@ export function resolveConfigRef(configFromBase: string | undefined): string | u
 }
 
 /**
+ * Untracked, non-ignored files (`git ls-files --others --exclude-standard`).
+ * Needed because `git diff` never shows untracked files, yet an agent-created
+ * `.env` or `secrets/dev.key` must still trip the forbidden-path check.
+ * Files matched by .gitignore are NOT reported (known boundary).
+ */
+export function getUntrackedFiles(root: string): string[] {
+  const out = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  return out.split("\0").filter(Boolean);
+}
+
+/**
  * Snapshot of the working tree state (git status --porcelain): path → XY status.
  * Used to detect side effects left behind by verification / revert-rerun commands.
  */

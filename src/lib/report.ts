@@ -27,6 +27,8 @@ export interface CheckReport {
   commit: string;
   /** where attractor.yml was loaded from: "working tree" or "<ref>:.converge/attractor.yml" */
   configSource: string;
+  /** how test-revert-rerun executed: in-place | isolated */
+  testIntegrityMode: string;
   diff: {
     base: string;
     changedFiles: number;
@@ -69,10 +71,13 @@ export function renderCheckMarkdown(r: CheckReport): string {
   const lines: string[] = [];
   lines.push(`# Converge Check Report`);
   lines.push("");
+  lines.push(`**Status: ${r.status.toUpperCase()}** — closure ${r.closure.allowed ? "allowed" : "blocked"} (${r.closure.blockers.length} blocker(s), ${r.closure.warnings.length} warning(s))`);
+  lines.push("");
   lines.push(`- Plan: ${r.plan ?? "(no active plan)"}`);
   lines.push(`- Mode: ${r.mode}`);
   lines.push(`- Commit: ${r.commit}`);
   lines.push(`- Config: ${r.configSource}`);
+  lines.push(`- Test integrity mode: ${r.testIntegrityMode}`);
   lines.push(`- Generated: ${r.generatedAt}`);
   lines.push("");
   lines.push(`## Behavior Evidence (executed by converge)`);

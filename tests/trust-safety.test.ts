@@ -109,6 +109,11 @@ attractor:
       from: "src/ui/**"
       cannot_import: "src/db/**"
       severity: error
+  forbidden_paths:
+    - path: ".env"
+      severity: error
+    - path: "secrets/**"
+      severity: error
 verification:
   executed_by: converge
   before_close:
@@ -258,6 +263,8 @@ describe("correction packet", () => {
     expect(out).toContain("Allowed repair direction");
     expect(out).toContain("converge check");
     expect(out).toContain("Do Not");
+    expect(out).toContain("Minimal Next Prompt");
+    expect(out).toContain("Do not declare completion until converge close succeeds.");
     expect(fs.existsSync(path.join(repo, ".converge", "reports", "adhoc", "correction.md"))).toBe(
       true
     );
@@ -326,6 +333,32 @@ describe("test-revert-rerun safety", () => {
   it("rejects an unknown --test-integrity-mode", () => {
     const out = run(["check", "--test-integrity-mode", "yolo"], { expectFail: true });
     expect(out).toMatch(/test-integrity-mode/);
+  });
+
+  it("audit passes --test-integrity-mode through to the internal check", () => {
+    run(["audit", "--fresh", "--no-llm", "--test-integrity-mode", "isolated"], {
+      expectFail: true, // side-effect warning may exist; judgment itself is not asserted here
+    });
+    const check = JSON.parse(read(".converge/reports/adhoc/check.json"));
+    expect(check.testIntegrityMode).toBe("isolated");
+    fs.rmSync(path.join(repo, "coverage.tmp"), { force: true });
+  });
+
+  it("blocks untracked forbidden files (never git-added)", () => {
+    write(".env", "SECRET=abc");
+    write("secrets/dev.key", "-----KEY-----");
+    const report = runJson(["check", "--json"]);
+    fs.rmSync(path.join(repo, ".env"), { force: true });
+    fs.rmSync(path.join(repo, "secrets"), { recursive: true, force: true });
+    fs.rmSync(path.join(repo, "coverage.tmp"), { force: true });
+
+    expect(report.status).toBe("blocked");
+    const env = report.checks.find((c: any) => c.id === "forbidden-path:.env");
+    expect(env.result).toBe("failed");
+    expect(env.evidence).toContain("untracked");
+    const key = report.checks.find((c: any) => c.id === "forbidden-path:secrets/**");
+    expect(key.result).toBe("failed");
+    expect(key.evidence).toContain("secrets/dev.key");
   });
 });
 

@@ -179,6 +179,20 @@ ${requiredCommands.join("\n")}
 ## Do Not
 
 ${doNot.map((d) => `- ${d}`).join("\n")}
+
+## Minimal Next Prompt
+
+Copy-paste this to ${agent === "codex" ? "Codex" : agent === "claude" ? "Claude Code" : "your agent"} together with the packet above:
+
+\`\`\`text
+Use the ConvergeKit Correction Packet above as authoritative feedback.
+Revise the current patch so the original plan goal is preserved, but every blocker is resolved.
+Do not modify .converge/attractor.yml. Do not weaken tests.
+After patching, run:
+${requiredCommands.map((c) => `  ${c}`).join("\n")}
+  converge close ${planId ?? "<PLAN-ID>"}
+Do not declare completion until converge close succeeds.
+\`\`\`
 `;
 
   const json = {

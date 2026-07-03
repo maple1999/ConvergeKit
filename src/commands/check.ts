@@ -5,6 +5,7 @@ import {
   currentCommit,
   getDiffSummary,
   getStatusSnapshot,
+  getUntrackedFiles,
   isGitRepo,
   resolveBaseRef,
   resolveConfigRef,
@@ -56,6 +57,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
 
   const cfg = loadAttractor(root, { configFromBase });
   const diff = getDiffSummary(root, base);
+  const untracked = getUntrackedFiles(root);
 
   const planId = opts.plan ?? getActivePlanId(root);
   const plan = planId ? parsePlan(root, planId) : null;
@@ -71,7 +73,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
     cfg.verification?.before_close?.find((c) => c.id === "test") ?? null;
 
   const checks = [
-    ...checkForbiddenPaths(cfg, diff),
+    ...checkForbiddenPaths(cfg, diff, untracked),
     ...(await checkDependencyDirection(root, cfg, diff)),
     ...checkDiffScope(cfg, diff, plan),
     ...checkTestIntegrity(root, cfg, diff, {
@@ -107,6 +109,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
     configSource: configFromBase
       ? `${configFromBase}:.converge/attractor.yml`
       : "working tree",
+    testIntegrityMode,
     diff: {
       base,
       changedFiles: diff.files.length,
@@ -145,6 +148,21 @@ export async function checkCommand(opts: CheckOptions): Promise<void> {
   } else {
     console.log(renderCheckMarkdown(report));
   }
+
+  // empty diff usually means the base ref is wrong, not that there is no drift
+  if (report.diff.changedFiles === 0) {
+    console.error(
+      `\nNote: no diff detected against ${report.diff.base}. If your agent already committed its changes, try:\n` +
+        `  converge check --base HEAD~1\n` +
+        `  converge check --base origin/main\n` +
+        `In GitHub Actions: converge check --base auto --config-from-base auto`
+    );
+  } else if (process.env.GITHUB_ACTIONS && report.diff.base === "HEAD") {
+    console.error(
+      "\nNote: running in GitHub Actions with --base HEAD; for PRs prefer --base auto --config-from-base auto."
+    );
+  }
+
   if (report.status === "blocked") {
     const configModified = report.checks.some(
       (c) => c.id === "attractor-config-modified" && c.result === "failed"

@@ -23,6 +23,8 @@ export interface AuditOptions {
   base?: string;
   /** trust boundary: load attractor.yml from this ref instead of the working tree ("auto" supported) */
   configFromBase?: string;
+  /** test-revert-rerun mode for the internal check: in-place | isolated */
+  testIntegrityMode?: string;
 }
 
 export interface AuditJudgment {
@@ -81,6 +83,7 @@ export async function auditCommand(opts: AuditOptions): Promise<AuditJudgment> {
     plan: planId ?? undefined,
     base,
     configFromBase,
+    testIntegrityMode: opts.testIntegrityMode,
   });
 
   // 2. build evidence pack

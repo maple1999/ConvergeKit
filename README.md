@@ -2,22 +2,13 @@
 
 **AI agents can pass tests while drifting your architecture. ConvergeKit catches that.**
 
-ConvergeKit is a repo-native, attractor-first harness for Claude Code, Codex, OpenCode, Cline, and other coding agents.
+## 30-second demo
 
-It helps you:
-
-- define where your repo should converge (`.converge/attractor.yml`);
-- create plans with closure criteria;
-- check AI-generated diffs for drift;
-- run fresh audits using live repo evidence;
-- prevent agents from self-declaring completion;
-- generate `CLAUDE.md` and `AGENTS.md` from the same source.
-
-```text
-Attractor → Plan → Agent Execution → Check → Fresh Audit → Closure → Memory / Handoff
-```
-
-## The demo: tests passed, closure blocked
+1. An AI agent fixes a login bug.
+2. `npm test` passes — the agent declares the task complete.
+3. But the patch imported the DB client straight from the UI layer.
+4. `converge check` blocks closure with the exact violation.
+5. `converge correction` produces a repair packet you feed back to Claude/Codex.
 
 ```text
 $ npm test
@@ -35,14 +26,35 @@ Blockers:
 1. ui-cannot-import-db: src/ui/auth.js imports src/db/client.js
 ```
 
-Run it yourself: `bash scripts/demo.sh` (uses [examples/demo-app](examples/demo-app)). The script also reproduces the second scenario — an agent that "fixes" a task by adapting the tests to its implementation, caught by **test-revert-rerun**: converge reverts the test-file changes to the diff base, re-runs the tests, and blocks closure if the implementation only passes with the modified tests.
+Run it yourself: `bash scripts/setup-demo.sh && bash scripts/demo.sh` (uses [examples/demo-app](examples/demo-app)). The script also reproduces the second scenario — an agent that "fixes" a task by adapting the tests to its implementation, caught by **test-revert-rerun**: converge reverts the test-file changes to the diff base, re-runs the tests, and blocks closure if the implementation only passes with the modified tests.
 
-When closure is blocked, `converge correction` turns the reports into a **Correction Packet** — structured repair instructions (violated rule, evidence, allowed repair direction, required verification) you can feed straight back to Claude/Codex for the next round.
+When closure is blocked, `converge correction` turns the reports into a **Correction Packet** — structured repair instructions (violated rule, evidence, allowed repair direction, required verification, a minimal next prompt) you can feed straight back to Claude/Codex for the next round.
+
+## What it is
+
+ConvergeKit is a repo-native closure gate for Claude Code, Codex, OpenCode, Cline, and other coding agents: it decides whether AI-generated work may be *declared done*. It calls your repo's long-term direction an **attractor** — you define it once in `.converge/attractor.yml`, and ConvergeKit turns it into checks, fresh audits, closure gates, and agent instructions.
+
+It helps you:
+
+- define where your repo should converge (`.converge/attractor.yml`);
+- create plans with closure criteria;
+- check AI-generated diffs for drift;
+- run fresh audits using live repo evidence;
+- prevent agents from self-declaring completion;
+- generate `CLAUDE.md` and `AGENTS.md` from the same source.
+
+```text
+Attractor → Plan → Agent Execution → Check → Fresh Audit → Closure → Memory / Handoff
+```
 
 ## Quickstart
 
 ```bash
-npm install -g convergekit   # or: npm link from a checkout
+# from source (the npm package is not published yet)
+git clone https://github.com/maple1999/ConvergeKit
+cd ConvergeKit
+npm install && npm run build && npm link
+
 cd your-repo
 
 converge init                # scaffolds .converge/ + docs/, infers boundary
@@ -65,6 +77,8 @@ converge compile --all       # CLAUDE.md, AGENTS.md, skills, .clinerules,
                              # .opencode/instructions.md — all generated from
                              # .converge/attractor.yml (manual sections preserved)
 ```
+
+Once the npm package is published, `npm install -g convergekit` will replace the source install.
 
 ## Why not just tests?
 
@@ -115,7 +129,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-      - uses: maple1999/ConvergeKit@master   # or a pinned tag
+      - uses: maple1999/ConvergeKit@v0.1-beta-rc1
         with:
           base: auto                # origin/$GITHUB_BASE_REF
           config-from-base: auto    # trust boundary: attractor from base branch
@@ -123,15 +137,22 @@ jobs:
           audit: no-llm
 ```
 
+CI semantics — deterministic blockers short-circuit closure:
+
+- `converge check` **fails** → the fresh audit is *skipped*; the action appends a Correction Packet to the job summary instead.
+- `converge check` **passes** → the fresh audit runs (unless `audit: none`).
+
 Or run the CLI directly:
 
 ```yaml
-      - run: npm install -g convergekit
+      - run: git clone --depth 1 https://github.com/maple1999/ConvergeKit /tmp/ck
+        # after the npm release: npm install -g convergekit
+      - run: cd /tmp/ck && npm ci && npm run build && npm link
       - run: converge check --strict --base auto --config-from-base auto
       - run: converge audit --fresh --no-llm --base auto --config-from-base auto
 ```
 
-`error`-severity blockers fail CI; warnings report without failing (`--strict` escalates them); advisory findings are recorded only. When the gate fails, the action appends the check report and Correction Packet to the job summary.
+`error`-severity blockers fail CI; warnings report without failing (`--strict` escalates them); advisory findings are recorded only.
 
 ## Security model
 
@@ -142,8 +163,9 @@ ConvergeKit is an *external acceptance layer* for untrusted patches — includin
 - **Verification evidence is non-fakeable by construction.** Commands are executed by converge itself; exit code, output hash and timestamps are recorded. Pre-existing logs are advisory only.
 - **test-revert-rerun cleans up after itself.** In-place mode snapshots test files, verifies the restore byte-for-byte, and *fails the check* if restoration failed or the working tree was left dirty (`test-revert-restore`, `working-tree-side-effects`). `--test-integrity-mode isolated` (experimental) runs the whole revert-rerun in a temporary detached git worktree and never touches your working tree; if the isolated environment needs setup, configure `verification.setup_for_isolated` (e.g. `npm ci`).
 - **Side effects are reported, not hidden.** Test commands that generate snapshots/coverage/cache files show up as a warning (a blocker under `--strict`); anything that *reverts your uncommitted changes* is a blocker outright.
+- **Untracked files don't slip through.** Forbidden-path rules match both the tracked diff *and* untracked files — an agent-created `.env` blocks closure even before `git add`.
 
-Known boundary: side-effect detection uses `git status`, so files matched by `.gitignore` are not tracked. The LLM audit is advisory-merged — deterministic blockers always survive; the LLM never owns final authority.
+Known boundaries: files matched by `.gitignore` are not scanned (side-effect detection and untracked forbidden files both rely on `git status`/`git ls-files`); a future `--scan-forbidden-filesystem` mode may cover them. The LLM audit is advisory-merged — deterministic blockers always survive; the LLM never owns final authority.
 
 ## The correction loop
 
@@ -199,8 +221,10 @@ v0.1-beta (this release): product mode, JS/TS boundary checking, the full closur
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest: unit + end-to-end on a temp git fixture
-bash scripts/demo.sh
+npm test          # vitest: unit + end-to-end on temp git fixtures
+bash scripts/setup-demo.sh && bash scripts/demo.sh
 ```
 
-MIT license.
+CI (GitHub Actions) runs the test suite on Ubuntu and Windows plus the full demo on every push/PR.
+
+MIT license — see [LICENSE](LICENSE).

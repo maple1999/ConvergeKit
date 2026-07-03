@@ -78,6 +78,11 @@ program
     "--config-from-base <ref>",
     'untrusted-PR mode: load .converge/attractor.yml from this ref, not the working tree ("auto" supported)'
   )
+  .option(
+    "--test-integrity-mode <mode>",
+    "test-revert-rerun mode for the internal check: in-place | isolated",
+    "in-place"
+  )
   .action(
     wrap((opts: Record<string, unknown>) =>
       auditCommand({
@@ -86,6 +91,7 @@ program
         noLlm: opts.llm === false,
         base: opts.base as string | undefined,
         configFromBase: opts.configFromBase as string | undefined,
+        testIntegrityMode: opts.testIntegrityMode as string | undefined,
       })
     )
   );

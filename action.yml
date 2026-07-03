@@ -9,6 +9,12 @@ branding:
   icon: "check-circle"
   color: "purple"
 
+# Semantics (deterministic blockers short-circuit closure):
+#   converge check fails  -> fresh audit is SKIPPED, a Correction Packet is
+#                            appended to the job summary instead
+#   converge check passes -> fresh audit runs (unless audit: none)
+# A future `audit-on-check-failure` input may make the audit unconditional.
+
 inputs:
   base:
     description: >-
@@ -32,7 +38,7 @@ inputs:
     required: false
     default: "no-llm"
   test-integrity-mode:
-    description: 'test-revert-rerun mode: "in-place" or "isolated" (experimental).'
+    description: 'test-revert-rerun mode: "in-place" or "isolated" (experimental). Applies to check AND audit.'
     required: false
     default: "in-place"
   working-directory:
@@ -62,19 +68,29 @@ runs:
         if [ "${{ inputs.strict }}" = "true" ]; then
           args+=(--strict)
         fi
-        echo "## ConvergeKit Check" >> "$GITHUB_STEP_SUMMARY"
+        {
+          echo "# ConvergeKit Closure Gate"
+          echo ""
+          echo "- config source: ${{ inputs.config-from-base != '' && inputs.config-from-base || 'PR head (working tree)' }}"
+          echo "- diff base: ${{ inputs.base }}"
+          echo "- test integrity mode: ${{ inputs.test-integrity-mode }}"
+          echo ""
+          echo "## Deterministic Check"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
         converge check "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: converge audit --fresh
+      # deterministic blockers short-circuit: this step is skipped when check failed
       if: ${{ inputs.audit != 'none' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        args=(--fresh --no-llm --base "${{ inputs.base }}")
+        args=(--fresh --no-llm --base "${{ inputs.base }}" --test-integrity-mode "${{ inputs.test-integrity-mode }}")
         if [ -n "${{ inputs.config-from-base }}" ]; then
           args+=(--config-from-base "${{ inputs.config-from-base }}")
         fi
-        echo "## ConvergeKit Fresh Audit" >> "$GITHUB_STEP_SUMMARY"
+        echo "## Fresh Audit" >> "$GITHUB_STEP_SUMMARY"
         converge audit "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: correction packet on failure
@@ -82,5 +98,14 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        echo "## ConvergeKit Correction Packet" >> "$GITHUB_STEP_SUMMARY"
+        {
+          echo "## Fresh Audit"
+          echo ""
+          echo "Skipped — the deterministic check already blocked closure."
+          echo ""
+          echo "## Correction Packet"
+          echo ""
+          echo "Feed this to your agent (or run \`converge correction --for claude\` locally):"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
         converge correction 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || true
